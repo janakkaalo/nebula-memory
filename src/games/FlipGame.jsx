@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { formatTime, useTimer } from '../hooks/useMemoryStats.js'
 
 const SETS = {
@@ -31,6 +31,8 @@ export default function FlipGame({ onWin, play }) {
   const won = matched === cards.length
   const [secs, resetSecs] = useTimer(!won && moves > 0)
   const progress = cards.length ? matched / cards.length : 0
+  const flipTimeout = useRef(0)
+  useEffect(() => () => clearTimeout(flipTimeout.current), [])
 
   const liveScore = useMemo(() => {
     const base = level === 'hard' ? 1200 : level === 'medium' ? 900 : 600
@@ -44,6 +46,7 @@ export default function FlipGame({ onWin, play }) {
   }, [won, moves, secs, level, bestStreak])
 
   function restart(lv = level) {
+    clearTimeout(flipTimeout.current)
     const set = SETS[lv].symbols
     setCards(shuffled(set))
     setOpen([])
@@ -84,7 +87,8 @@ export default function FlipGame({ onWin, play }) {
         setStreak(0)
         play(180, 0.12, 'sawtooth', 0.06)
         setLock(true)
-        setTimeout(() => {
+        clearTimeout(flipTimeout.current)
+        flipTimeout.current = setTimeout(() => {
           setOpen([])
           setLock(false)
         }, 620)
@@ -108,9 +112,9 @@ export default function FlipGame({ onWin, play }) {
       </div>
       <div className="controls-row">
         {Object.entries(SETS).map(([key, s]) => (
-          <button key={key} className={`btn small ${level === key ? 'primary' : ''}`} onClick={() => setLevel(key)}>{s.label}</button>
+          <button key={key} type="button" className={`btn small ${level === key ? 'primary' : ''}`} onClick={() => setLevel(key)} aria-pressed={level === key}>{s.label}</button>
         ))}
-        <button className="btn small ghost" onClick={() => restart()}>↻ Restart</button>
+        <button type="button" className="btn small ghost" onClick={() => restart()}>↻ Restart</button>
       </div>
       <div className={`flip-grid ${cols}`} role="grid" aria-label="Memory cards">
         {cards.map((c, i) => {
@@ -118,10 +122,13 @@ export default function FlipGame({ onWin, play }) {
           return (
             <button
               key={c.id}
+              type="button"
               role="gridcell"
               className={`flip-card ${faceUp ? 'flipped' : ''} ${c.matched ? 'matched' : ''}`}
               onClick={() => flip(c)}
               aria-label={faceUp ? c.symbol : `hidden card ${i + 1}`}
+              aria-pressed={faceUp}
+              disabled={faceUp && c.matched}
               style={{ animationDelay: `${Math.min(i * 18, 400)}ms` }}
             >
               <span className="flip-inner">

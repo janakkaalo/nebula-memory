@@ -10,10 +10,23 @@ export default defineConfig({
     outDir: 'dist',
     assetsInlineLimit: 4096,
     chunkSizeWarningLimit: 900,
+    target: 'baseline-widely-available',
+    cssCodeSplit: true,
+    cssMinify: true,
+    sourcemap: false,
+    reportCompressedSize: true,
+    modulePreload: {
+      polyfill: false,
+    },
     rolldownOptions: {
       output: {
+        // three.js (~550KB) only loads when the nebula/cube scenes mount.
+        // react vendor is separate so game chunks stay 2-12KB each.
         codeSplitting: {
-          groups: [{ name: 'three', test: /node_modules[\\/]three/ }],
+          groups: [
+            { name: 'three', test: /node_modules[\\/]three/ },
+            { name: 'react-vendor', test: /node_modules[\\/](react|react-dom|scheduler)/ },
+          ],
         },
       },
     },

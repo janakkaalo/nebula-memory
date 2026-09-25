@@ -11,9 +11,20 @@
     <meta property="og:type" content="website" />
     <!-- DEPLOY STEP: patch og:image and og:url with live GitHub Pages URL -->
     <title>Nebula Memory Arcade - 4 Free Memory Games</title>
+    <style>
+      html{background:#0a0722;color:#f3f0ff}
+      body{margin:0;background:#0a0722}
+      #root{min-height:100svh}
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="boot" aria-hidden="true" style="max-width:1160px;margin:0 auto;padding:90px 20px 40px;display:grid;gap:14px">
+        <div style="height:34px;width:60%;border-radius:12px;background:rgba(255,255,255,.07)"></div>
+        <div style="height:14px;width:90%;border-radius:99px;background:rgba(255,255,255,.06)"></div>
+        <div style="height:14px;width:40%;border-radius:99px;background:rgba(255,255,255,.06)"></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

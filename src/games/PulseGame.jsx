@@ -27,98 +27,152 @@ export default function PulseGame({ onWin, play }) {
   const [best, setBest] = useState(0)
   const [secs, resetSecs] = useTimer(phase === 'input' || phase === 'showing')
   const timers = useRef([])
-  const seqRef = useRef([])
-  seqRef.current = seq
+  // Refs mirror state so rapid taps never read a stale closure.
+  // Synced in effects (not during render) + immediately in handlers.
+  const seqRef = useRef(seq)
+  const inputRef = useRef(input)
+  const phaseRef = useRef(phase)
+  const mistakesRef = useRef(mistakes)
+  const speedRef = useRef(speed)
+  const secsRef = useRef(secs)
+  const roundRef = useRef(round)
+  const playRef = useRef(play)
+  const onWinRef = useRef(onWin)
+  useEffect(() => { seqRef.current = seq }, [seq])
+  useEffect(() => { inputRef.current = input }, [input])
+  useEffect(() => { phaseRef.current = phase }, [phase])
+  useEffect(() => { mistakesRef.current = mistakes }, [mistakes])
+  useEffect(() => { speedRef.current = speed }, [speed])
+  useEffect(() => { secsRef.current = secs }, [secs])
+  useEffect(() => { roundRef.current = round }, [round])
+  useEffect(() => { playRef.current = play }, [play])
+  useEffect(() => { onWinRef.current = onWin }, [onWin])
+
+  function later(fn, ms) {
+    const id = setTimeout(() => {
+      timers.current = timers.current.filter((t) => t !== id)
+      fn()
+    }, ms)
+    timers.current.push(id)
+    return id
+  }
 
   function clearTimers() {
     timers.current.forEach(clearTimeout)
     timers.current = []
   }
-  useEffect(() => clearTimers, [])
+  useEffect(() => () => clearTimers(), [])
 
   function start() {
     clearTimers()
     resetSecs()
     setMistakes(0)
+    mistakesRef.current = 0
     setInput([])
+    inputRef.current = []
     const first = Math.floor(Math.random() * 4)
     const s = [first]
     setSeq(s)
+    seqRef.current = s
     setRound(1)
+    roundRef.current = 1
     setBest((b) => Math.max(b, 1))
     showSeq(s)
     buzz(20)
   }
 
   function showSeq(s) {
-    const cfg = SPEEDS[speed]
-    // accelerate slightly as sequence grows
+    clearTimers()
+    const cfg = SPEEDS[speedRef.current]
+    // accelerate slightly as sequence grows, never below readability floor
     const step = Math.max(340, cfg.step - s.length * 18)
     setPhase('showing')
+    phaseRef.current = 'showing'
     setInput([])
+    inputRef.current = []
     setLit(-1)
     s.forEach((v, i) => {
-      timers.current.push(setTimeout(() => {
+      later(() => {
         setLit(v)
         buzz(12)
-        play(ORBS[v].freq, 0.28, 'sine', 0.16)
-        setTimeout(() => play(ORBS[v].freq * 2, 0.2, 'sine', 0.05), 60)
-        timers.current.push(setTimeout(() => setLit(-1), cfg.lit))
-      }, step * i + 420))
+        try {
+          playRef.current(ORBS[v].freq, 0.28, 'sine', 0.16)
+          later(() => { try { playRef.current(ORBS[v].freq * 2, 0.2, 'sine', 0.05) } catch { /* noop */ } }, 60)
+        } catch { /* noop */ }
+        later(() => setLit((cur) => (cur === v ? -1 : cur)), cfg.lit)
+      }, step * i + 420)
     })
-    timers.current.push(setTimeout(() => {
+    later(() => {
       setPhase('input')
+      phaseRef.current = 'input'
       setLit(-1)
-    }, step * s.length + 480))
+    }, step * s.length + 480)
   }
 
   function press(i) {
-    if (phase !== 'input') return
-    play(ORBS[i].freq, 0.16)
+    if (phaseRef.current !== 'input') return
+    try { playRef.current(ORBS[i].freq, 0.16) } catch { /* noop */ }
     buzz(10)
     setLit(i)
-    setTimeout(() => setLit(-1), 180)
-    const next = [...input, i]
+    later(() => setLit((cur) => (cur === i ? -1 : cur)), 180)
+    const next = [...inputRef.current, i]
+    inputRef.current = next
     setInput(next)
     const idx = next.length - 1
-    if (next[idx] !== seq[idx]) {
-      play(140, 0.3, 'sawtooth', 0.1)
+    const curSeq = seqRef.current
+    if (next[idx] !== curSeq[idx]) {
+      try { playRef.current(140, 0.3, 'sawtooth', 0.1) } catch { /* noop */ }
       buzz(70)
-      const m = mistakes + 1
+      const m = mistakesRef.current + 1
+      mistakesRef.current = m
       setMistakes(m)
       if (m >= 2) {
         setPhase('lost')
+        phaseRef.current = 'lost'
+        clearTimers()
+        setLit(-1)
         buzz([80, 50, 80])
-        onWin({ score: Math.max(20, round * 40 - secs), moves: round, time: secs, lost: true })
+        onWinRef.current({ score: Math.max(20, roundRef.current * 40 - secsRef.current), moves: roundRef.current, time: secsRef.current, lost: true })
       } else {
         setPhase('showing')
-        play(300, 0.2, 'sine', 0.08)
-        const t = setTimeout(() => showSeq(seqRef.current), 750)
-        timers.current.push(t)
+        phaseRef.current = 'showing'
+        try { playRef.current(300, 0.2, 'sine', 0.08) } catch { /* noop */ }
+        later(() => showSeq(seqRef.current), 750)
       }
       return
     }
-    if (next.length === seq.length) {
-      if (seq.length >= 10) {
+    if (next.length === curSeq.length) {
+      if (curSeq.length >= 10) {
         setPhase('champion')
+        phaseRef.current = 'champion'
+        clearTimers()
+        setLit(-1)
         buzz([25, 30, 40, 30, 100])
-        play(660, 0.15); setTimeout(() => play(880, 0.2), 120); setTimeout(() => play(1174, 0.3), 260)
-        onWin({ score: 1000 + Math.max(0, 300 - secs * 2) + (speed === 'blitz' ? 250 : speed === 'chill' ? 0 : 100), moves: seq.length, time: secs })
+        try {
+          playRef.current(660, 0.15)
+          later(() => { try { playRef.current(880, 0.2) } catch { /* noop */ } }, 120)
+          later(() => { try { playRef.current(1174, 0.3) } catch { /* noop */ } }, 260)
+        } catch { /* noop */ }
+        const sp = speedRef.current
+        onWinRef.current({ score: 1000 + Math.max(0, 300 - secsRef.current * 2) + (sp === 'blitz' ? 250 : sp === 'chill' ? 0 : 100), moves: curSeq.length, time: secsRef.current })
         return
       }
       const v = Math.floor(Math.random() * 4)
-      const s2 = [...seq, v]
+      const s2 = [...curSeq, v]
+      seqRef.current = s2
       setSeq(s2)
       setRound(s2.length)
+      roundRef.current = s2.length
       setBest((b) => Math.max(b, s2.length))
       setPhase('showing')
-      play(ORBS[v].freq, 0.1, 'sine', 0.06)
-      const t = setTimeout(() => showSeq(s2), 820)
-      timers.current.push(t)
+      phaseRef.current = 'showing'
+      try { playRef.current(ORBS[v].freq, 0.1, 'sine', 0.06) } catch { /* noop */ }
+      later(() => showSeq(s2), 820)
     }
   }
 
   const progress = Math.min(1, seq.length / 10)
+  const inputLeft = Math.max(0, seq.length - input.length)
 
   return (
     <div>
@@ -138,11 +192,11 @@ export default function PulseGame({ onWin, play }) {
         ))}
       </div>
       <div className="controls-row">
-        {phase === 'idle' && <button className="btn small primary" onClick={start}>▶ Start pattern</button>}
-        {(phase === 'lost' || phase === 'champion') && <button className="btn small primary" onClick={start}>↻ Play again</button>}
+        {phase === 'idle' && <button type="button" className="btn small primary" onClick={start}>▶ Start pattern</button>}
+        {(phase === 'lost' || phase === 'champion') && <button type="button" className="btn small primary" onClick={start}>↻ Play again</button>}
         <span style={{ display: 'flex', gap: 6 }}>
           {Object.entries(SPEEDS).map(([k, s]) => (
-            <button key={k} className={`btn small ${speed === k ? 'primary' : 'ghost'}`} disabled={phase === 'showing' || phase === 'input'} onClick={() => setSpeed(k)}>{s.label}</button>
+            <button key={k} type="button" className={`btn small ${speed === k ? 'primary' : 'ghost'}`} disabled={phase === 'showing' || phase === 'input'} onClick={() => { setSpeed(k); speedRef.current = k }}>{s.label}</button>
           ))}
         </span>
         <span className="cube-hint" style={{
@@ -150,7 +204,7 @@ export default function PulseGame({ onWin, play }) {
           fontWeight: 700,
         }}>
           {phase === 'idle' && 'Press start. Sound on for full effect.'}
-          {phase === 'input' && `● Your turn — ${seq.length - input.length} left`}
+          {phase === 'input' && `● Your turn — ${inputLeft} left`}
           {phase === 'showing' && '◌ Watch closely…'}
           {phase === 'lost' && `Two misses. Round ${round} reached.`}
           {phase === 'champion' && '10 steps cleared. Memory master.'}
@@ -159,11 +213,13 @@ export default function PulseGame({ onWin, play }) {
       <div className="pulse-board">
         {ORBS.map((o, i) => (
           <button
-            key={i}
+            key={o.name}
+            type="button"
             className={`pulse-orb orb-${i} ${lit === i ? 'lit' : ''}`}
             onClick={() => press(i)}
             disabled={phase !== 'input'}
             aria-label={`${o.name} orb ${i + 1}`}
+            aria-pressed={lit === i}
           >
             {o.emoji}
           </button>

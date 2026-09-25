@@ -1,5 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
-import NebulaBackground from './three/NebulaBackground.jsx'
+
+const NebulaBackground = lazy(() => import('./three/NebulaBackground.jsx'))
 const FlipGame = lazy(() => import('./games/FlipGame.jsx'))
 const PulseGame = lazy(() => import('./games/PulseGame.jsx'))
 const CubeGame = lazy(() => import('./games/CubeGame.jsx'))
@@ -14,41 +15,94 @@ const GAMES = [
   { id: 'flash', name: 'Flash Grid Recall', short: 'Flash', desc: 'Memorize the flash, recall hidden tiles. 5 levels.', art: 'art-4', icon: '⚡', tag: 'Recall', color: '#fcd34d' },
 ]
 
+const GAME_LOADERS = {
+  flip: () => import('./games/FlipGame.jsx'),
+  pulse: () => import('./games/PulseGame.jsx'),
+  cube: () => import('./games/CubeGame.jsx'),
+  flash: () => import('./games/FlashGame.jsx'),
+}
+
+function prefetchGame(id) {
+  try {
+    const l = GAME_LOADERS[id]
+    if (l) l()
+  } catch { /* noop */ }
+}
+
 function useReveal(dep) {
   useEffect(() => {
     const els = document.querySelectorAll('.reveal, .band-card, .game-card')
+    if (!('IntersectionObserver' in window)) {
+      els.forEach((el) => el.classList.add('in'))
+      return
+    }
     const io = new IntersectionObserver((entries) => {
-      entries.forEach((e) => { if (e.isIntersecting) e.target.classList.add('in') })
+      entries.forEach((e) => {
+        if (e.isIntersecting) {
+          e.target.classList.add('in')
+          io.unobserve(e.target)
+        }
+      })
     }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' })
-    els.forEach((el) => io.observe(el))
+    els.forEach((el) => {
+      if (!el.classList.contains('in')) io.observe(el)
+    })
     return () => io.disconnect()
   }, [dep])
 }
 
 export default function App() {
   const [route, setRoute] = useState(() => window.location.hash.replace('#/', '') || 'home')
-  const [activeGame, setActiveGame] = useState('flip')
+  const [activeGame, setActiveGame] = useState(() => {
+    const h = window.location.hash.replace('#/', '')
+    return GAMES.some((g) => g.id === h) ? h : 'flip'
+  })
   const [modal, setModal] = useState(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const { best, saveBest, clearAll } = useBestScores()
   const { muted, setMuted, play } = useSound()
-  useReveal(route + activeGame + menuOpen)
+  useReveal(route + activeGame)
 
   useEffect(() => {
-    const onHash = () => setRoute(window.location.hash.replace('#/', '') || 'home')
+    const onHash = () => {
+      const h = window.location.hash.replace('#/', '') || 'home'
+      setRoute(h)
+      if (GAMES.some((g) => g.id === h)) {
+        setActiveGame(h)
+        setModal(null)
+      }
+    }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
-  // lock body scroll when drawer / modal open
+  // Warm game chunks after first paint so tab switches feel instant
+  // without costing initial load.
   useEffect(() => {
-    document.body.style.overflow = (menuOpen || modal) ? '' : ''
-  }, [menuOpen, modal])
+    let cancelled = false
+    const warm = () => {
+      if (cancelled) return
+      prefetchGame(activeGame === 'flip' ? 'pulse' : 'flip')
+      setTimeout(() => { if (!cancelled) { prefetchGame('flash'); prefetchGame('cube') } }, 2500)
+    }
+    if ('requestIdleCallback' in window) {
+      const id = window.requestIdleCallback(warm, { timeout: 3000 })
+      return () => { cancelled = true; window.cancelIdleCallback(id) }
+    }
+    const t = setTimeout(warm, 2000)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [activeGame])
+
+  // lock body scroll only while the result modal is open
+  useEffect(() => {
+    document.body.style.overflow = modal ? 'hidden' : ''
+    return () => { document.body.style.overflow = '' }
+  }, [modal])
 
   function go(id) {
     setMenuOpen(false)
     if (id === 'home') { window.location.hash = '#/'; setRoute('home') }
-    else { window.location.hash = `#/${id}`; setRoute(id); setModal(null) }
+    else { window.location.hash = `#/${id}`; setRoute(id); setActiveGame(id); setModal(null) }
     requestAnimationFrame(() => {
       if (id === 'home') window.scrollTo({ top: 0, behavior: 'smooth' })
       else document.getElementById('stage')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -80,7 +134,9 @@ export default function App() {
   return (
     <>
       <a className="skip-link" href="#main">Skip to games</a>
-      <NebulaBackground />
+      <Suspense fallback={null}>
+        <NebulaBackground />
+      </Suspense>
 
       {/* ── High-graphics mobile-friendly header ── */}
       <nav className="nav" aria-label="Main">
@@ -94,7 +150,13 @@ export default function App() {
           <div className="nav-links" role="menubar">
             <button className={route === 'home' ? 'active' : ''} onClick={() => go('home')}>Arcade</button>
             {GAMES.map((g) => (
-              <button key={g.id} className={route === g.id ? 'active' : ''} onClick={() => openGame(g.id)}>
+              <button
+                key={g.id}
+                className={route === g.id ? 'active' : ''}
+                onClick={() => openGame(g.id)}
+                onMouseEnter={() => prefetchGame(g.id)}
+                onFocus={() => prefetchGame(g.id)}
+              >
                 <span className="nl-ico" aria-hidden="true">{g.icon}</span> {g.name}
               </button>
             ))}
@@ -160,7 +222,7 @@ export default function App() {
                     Flip planets, follow pulses, orbit cubes, recall flashes. Best scores stay on this device.
                   </p>
                   <div className="hero-cta">
-                    <button className="btn primary big" onClick={() => openGame('flip')}><span aria-hidden="true">▶</span> Play now</button>
+                    <button className="btn primary big" onClick={() => openGame('flip')} onMouseEnter={() => prefetchGame('flip')}><span aria-hidden="true">▶</span> Play now</button>
                     <button className="btn glass" onClick={() => document.getElementById('games').scrollIntoView({ behavior: 'smooth' })}>Browse games</button>
                   </div>
                   <div className="hero-stats">
@@ -173,7 +235,7 @@ export default function App() {
                 </div>
                 <div className="hero-cards" aria-hidden="true">
                   {GAMES.map((g, i) => (
-                    <button key={g.id} tabIndex={-1} onClick={() => openGame(g.id)} className={`h-card h${i + 1}`}>
+                    <button key={g.id} tabIndex={-1} onClick={() => openGame(g.id)} onMouseEnter={() => prefetchGame(g.id)} className={`h-card h${i + 1}`}>
                       <span className="h-ico">{g.icon}</span>
                       <span className="h-name">{g.short}</span>
                       <span className="h-tag">{g.tag}</span>
@@ -199,7 +261,14 @@ export default function App() {
               </div>
               <section className="games-grid" aria-label="Games">
                 {GAMES.map((g) => (
-                  <button key={g.id} className={`game-card ${activeGame === g.id ? 'active' : ''}`} onClick={() => openGame(g.id)} style={{ '--gc': g.color }}>
+                  <button
+                    key={g.id}
+                    className={`game-card ${activeGame === g.id ? 'active' : ''}`}
+                    onClick={() => openGame(g.id)}
+                    onMouseEnter={() => prefetchGame(g.id)}
+                    onFocus={() => prefetchGame(g.id)}
+                    style={{ '--gc': g.color }}
+                  >
                     <div className={`game-art ${g.art}`}>
                       <span className="big">{g.icon}</span>
                       <span className="art-tag">{g.tag}</span>
@@ -262,7 +331,9 @@ export default function App() {
                   role="tab"
                   aria-selected={activeGame === g.id}
                   className={`tab ${activeGame === g.id ? 'primary' : ''}`}
-                  onClick={() => { setActiveGame(g.id); setModal(null) }}
+                  onClick={() => openGame(g.id)}
+                  onMouseEnter={() => prefetchGame(g.id)}
+                  onFocus={() => prefetchGame(g.id)}
                 >{g.icon} {g.short}</button>
               ))}
             </div>
@@ -295,7 +366,7 @@ export default function App() {
               <nav className="f-col" aria-label="Games">
                 <b>Games</b>
                 {GAMES.map((g) => (
-                  <button key={g.id} onClick={() => openGame(g.id)}>{g.icon} {g.name}</button>
+                  <button key={g.id} onClick={() => openGame(g.id)} onMouseEnter={() => prefetchGame(g.id)}>{g.icon} {g.name}</button>
                 ))}
               </nav>
               <nav className="f-col" aria-label="Arcade">
